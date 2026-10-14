@@ -27,7 +27,7 @@ const server = http.createServer((req, res) => {
 
   const html = `<!doctype html>
 <html lang="pt-BR">
-<head><meta charset="utf-8"><title>${INSTANCE_ID}</title></head>
+<head><meta charset="utf-8"><title>${INSTANCE_ID}</title><link rel="icon" href="data:,"></head>
 <body style="margin:0;font-family:system-ui;background:${COLOR};color:#fff">
   <main style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;text-align:center">
     <h1 style="font-size:4rem;margin:0">Respondido por: ${INSTANCE_ID}</h1>

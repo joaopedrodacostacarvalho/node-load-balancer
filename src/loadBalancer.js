@@ -5,94 +5,90 @@ const PORT = 8080;
 const HEALTH_CHECK_INTERVAL = 10000 // 10 segundos
 const REQUEST_TIMEOUT = 5000; // 5 segundos
 
-const servers = [
-  { url: 'http://localhost:3001', healthy: true, activeConections: 0 },
-  { url: 'http://localhost:3002', healthy: true, activeConections: 0 },
-  { url: 'http://localhost:3003', healthy: true, activeConections: 0 }
-];
+const servers = (process.env.BACKENDS
+  || 'http://localhost:3001,http://localhost:3002,http://localhost:3003')
+  .split(',').map(u => ({ url: u.trim(), healthy: true, activeConnections: 0 }));
+
 
 let current = 0;
 
 function getNextHealthyServer() {
-  const initialIndex = current;
-
-  while (true) {
-    const server = servers[current];
-
-    // O incremento para o próximo index volta para o início usando %
-    current = (current + 1) % servers.length;
-
-    if (server.healthy) {
-      return server;
-    }
-
-    // Se checamos todos os servidores e nenhum está healthy retorna null
-    if (current === initialIndex) {
-      return null;
-    }
+  const n = servers.length;
+  for (let i = 0; i < n; i++) {
+    const idx = (current + i) % n;
+    if (servers[idx].healthy) { current = (idx + 1) % n; return servers[idx]; }
   }
+  return null;
 }
 
 /**
  * @param {Request} req
  * @param {http.ServerResponse} res 
  */
-function handleProxy(req, res) {
-  const targetServer = getNextHealthyServer();
-
-  if (!targetServer) {
-    res.writeHead(503, { 'Content-Type': 'text/plain' });
-    res.end('Serviço não disponível: Nenhum backend healthy disponível')
-    return;
+function handleProxy(req, res, attempt = 0) {
+  if (attempt >= servers.length) {
+    if (!res.headersSent) res.writeHead(503, { 'content-type': 'text/plain' });
+    return res.end('Nenhum backend disponível');
   }
 
-  const targetUrl = new URL(targetServer.url);
+  const target = getNextHealthyServer();
+  if (!target) {
+    res.writeHead(503, { 'content-type': 'text/plain' });
+    return res.end('Nenhum backend disponível');
+  }
 
-  const options = {
-    hostname: targetUrl.hostname,
-    port: targetUrl.port,
+  const url = new URL(target.url);
+  target.activeConnections++;
+
+  let settled = false;
+  const finish = () => { if (!settled) { settled = true; target.activeConnections--; } };
+
+  const proxyReq = http.request({
+    hostname: url.hostname,
+    port: url.port,
     path: req.url,
     method: req.method,
     headers: {
       ...req.headers,
-      'X-Forwarded-For': req.socket.remoteAddress,
+      'X-Forwarded-For': (req.headers['x-forwarded-for'] ? req.headers['x-forwarded-for'] + ', ' : '') + req.socket.remoteAddress,
       'X-Proxy-By': 'NodeJS-LB-Simples'
     }
-  };
-
-  targetServer.activeConections++;
-
-  const proxyReq = http.request(options, (proxyReq) => {
-
-    res.writeHead(proxyReq.statusCode, proxyReq.headers);
-
-    proxyReq.pipe(res, { end: true });
-
-    proxyReq.on('end', () => {
-      targetServer.activeConections--;
+  }, (proxyRes) => {
+    console.log(`[LB] ${req.method} ${req.url} -> ${target.url} (${proxyRes.statusCode})`);
+    res.writeHead(proxyRes.statusCode, proxyRes.headers);
+    proxyRes.pipe(res);
+    proxyRes.on('end', finish);
+    proxyRes.on('error', (err) => {
+      console.warn(`[ProxyRes Error] ${target.url}: ${err.message}`);
+      finish();
+      if (!res.writableEnded) res.end();
     });
   });
 
-  proxyReq.on('error', (err) => {
-    console.error(`[Proxy Error] Não foi possível alcançar o backend ${targetServer.url}: ${err.message}`);
-    targetServer.activeConections--;
-
-    // Triga um estado de falha para este servidor
-    targetServer.healthy = false;
-
-    // Tenta novamente com outro server
-    handleProxy(req, res);
-  })
-
   proxyReq.setTimeout(REQUEST_TIMEOUT, () => {
-    console.error(`[Timeout] Backend ${targetServer.url} esgotou o tempo`);
-    proxyReq.destroy();
-    targetServer.healthy = false;
+    console.warn(`[Timeout] ${target.url}`);
+    target.healthy = false;
+    setImmediate(() => checkServerHealth(target));
+    proxyReq.destroy(new Error('timeout'));
   });
 
-  req.pipe(proxyReq, { end: true });
-}
+  proxyReq.on('error', (err) => {
+    console.error(`[Proxy Error] ${target.url}: ${err.message}`);
+    target.healthy = false;
+    finish();
 
+    // Só re-tenta se nada foi escrito ao cliente E o método é idempotente
+    const idempotent = ['GET', 'HEAD', 'OPTIONS'].includes(req.method);
+    if (!res.headersSent && idempotent) return handleProxy(req, res, attempt + 1);
+
+    if (!res.headersSent) {
+      res.writeHead(502, { 'content-type': 'text/plain' });
+    }
+    res.end('Bad Gateway');
+  });
+
+  req.pipe(proxyReq);
+}
 // Inicia o Load Balancer 
 const server = http.createServer(handleProxy);
 server.listen(PORT, () => {
@@ -100,46 +96,23 @@ server.listen(PORT, () => {
 });
 
 function checkServerHealth(server) {
-  const targetUrl = new URL(`${server.url}/health`);
-
-  const req = http.get({
-    hostname: targetUrl.hostname,
-    port: targetUrl.port,
-    path: targetUrl.pathname,
-    timeout: 3000
-  }, (res) => {
-    if (res.statusCode === 200) {
-      if (!server.healthy) {
-        console.log(`[Recuperação] Backend recuperado: ${server.url}`);
-        server.healthy = true;
-      }
-    } else {
-      if (server.healthy) {
-        console.warn(`[Unhealthy] Backend retornou status ${res.statusCode}: ${server.url}`);
-        server.healthy = false;
-      }
-    }
-    res.resume(); // Consumirá os dados de resposta para limpar memória
+  const url = new URL(`${server.url}/health`);
+  const req = http.get({ hostname: url.hostname, port: url.port, path: url.pathname }, (res) => {
+    res.resume();
+    const ok = res.statusCode === 200;
+    if (ok && !server.healthy) console.log(`[Recuperação] ${server.url}`);
+    if (!ok && server.healthy) console.warn(`[Unhealthy] ${server.url} -> ${res.statusCode}`);
+    server.healthy = ok;
   });
-
+  req.setTimeout(3000, () => req.destroy(new Error('health timeout')));
   req.on('error', (err) => {
-    if (server.healthy) {
-      console.warn(`[Unhealthy] Backend falhou no check de saúde: ${server.url}: ${err.message}`);
-      server.healthy = false;
-    }
-  });
-
-  req.on('timeout', () => {
-    if (server.healthy) {
-      console.warn(`[Unhealthy] Backend deu time out: ${server.url}`);
-      server.healthy = false;
-    }
-    req.destroy();
+    if (server.healthy) console.warn(`[Unhealthy] ${server.url}: ${err.message}`);
+    server.healthy = false;
   });
 }
 
 // Roda os checks de saúde periodicamente
 setInterval(() => {
-  console.log('Rodando os health checks...');
+  //console.log('Rodando os health checks...');
   servers.forEach(checkServerHealth);
 }, HEALTH_CHECK_INTERVAL);

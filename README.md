@@ -413,7 +413,7 @@ node-load-balancer/
   fatia. Alternativas: `least_conn`, weighted RR, ou algoritmos adaptativos.
 - **Health check tem janela de até `HEALTH_CHECK_INTERVAL`.** Uma instância
   que morre logo após um check pode receber tráfego por até ~10 s antes de
-  ser excluída — mitigado pelo fato de o próprio proxy marcar *unhealthy* ao
+  ser excluída que é mitigado pelo fato de o próprio proxy marcar *unhealthy* ao
   detectar erro de conexão.
 - **O balanceador é um SPOF** (*Single Point of Failure*). Se o `:8080`
   cair, o serviço cai. Em produção, rodariam pelo menos 2 Load Balancers

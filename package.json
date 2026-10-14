@@ -1,11 +1,16 @@
 {
   "name": "load-balancer",
   "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "type": "commonjs",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "start:app1": "cross-env PORT=3001 INSTANCE_ID=app-01 node src/backend.js",
+    "start:app2": "cross-env PORT=3002 INSTANCE_ID=app-02 node src/backend.js",
+    "start:app3": "cross-env PORT=3003 INSTANCE_ID=app-03 node src/backend.js",
+    "start:lb":   "node src/loadBalancer.js",
+    "start":      "concurrently -k -n app1,app2,app3,lb -c blue,green,yellow,magenta \"npm:start:app1\" \"npm:start:app2\" \"npm:start:app3\" \"npm:start:lb\""
   },
-  "keywords": [],
-  "type": "commonjs"
+  "devDependencies": {
+    "concurrently": "^9.0.0",
+    "cross-env": "^7.0.3"
+  }
 }

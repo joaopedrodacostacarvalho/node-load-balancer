@@ -3,19 +3,20 @@
   "version": "1.0.0",
   "type": "commonjs",
   "scripts": {
+    "prestart": "kill-port 3001 3002 3003 3004 8080",
+    "prestart:4": "kill-port 3001 3002 3003 3004 8080",
     "start:app1": "cross-env PORT=3001 INSTANCE_ID=app-01 node src/backend.js",
     "start:app2": "cross-env PORT=3002 INSTANCE_ID=app-02 node src/backend.js",
     "start:app3": "cross-env PORT=3003 INSTANCE_ID=app-03 node src/backend.js",
     "start:app4": "cross-env PORT=3004 INSTANCE_ID=app-04 node src/backend.js",
-
-    "start:lb":   "cross-env BACKENDS=http://localhost:3001,http://localhost:3002,http://localhost:3003 node src/loadBalancer.js",
+    "start:lb": "cross-env BACKENDS=http://localhost:3001,http://localhost:3002,http://localhost:3003 node src/loadBalancer.js",
     "start:lb:4": "cross-env BACKENDS=http://localhost:3001,http://localhost:3002,http://localhost:3003,http://localhost:3004 node src/loadBalancer.js",
-
-    "start":      "concurrently -n app1,app2,app3,lb -c blue,green,yellow,magenta \"npm:start:app1\" \"npm:start:app2\" \"npm:start:app3\" \"npm:start:lb\"",
-    "start:4":    "concurrently -n app1,app2,app3,app4,lb -c blue,green,yellow,magenta,cyan \"npm:start:app1\" \"npm:start:app2\" \"npm:start:app3\" \"npm:start:app4\" \"npm:start:lb:4\""
+    "start": "concurrently -n app1,app2,app3,lb -c blue,green,yellow,magenta \"npm:start:app1\" \"npm:start:app2\" \"npm:start:app3\" \"npm:start:lb\"",
+    "start:4": "concurrently -n app1,app2,app3,app4,lb -c blue,green,yellow,magenta,cyan \"npm:start:app1\" \"npm:start:app2\" \"npm:start:app3\" \"npm:start:app4\" \"npm:start:lb:4\""
   },
   "devDependencies": {
     "concurrently": "^9.0.0",
-    "cross-env": "^7.0.3"
+    "cross-env": "^7.0.3",
+    "kill-port": "^2.0.1"
   }
 }

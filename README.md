@@ -278,53 +278,47 @@ for i in $(seq 1 10); do
 done
 ```
 
-Esperado: três valores alternando.
+Esperado: três valores alternandos como: 
+```bash
+x-served-by: app-01
+x-served-by: app-02
+x-served-by: app-03
+...
+```
 
 ### 7.3 Distribuição em volume
 
-**Forma recomendada — `hey` (portável em Linux, macOS e Windows):**
+**Contagem por instância:**
 
-```bash
-hey -n 100 -c 1 -disable-keepalive http://localhost:8080
-```
-
-Ao final, o `hey` imprime um resumo (latências, status codes). Como o
-`X-Served-By` é específico por resposta, para contabilizar quem respondeu,
-peça dump dos headers:
-
-```bash
-hey -n 100 -c 1 -disable-keepalive -o csv http://localhost:8080 > resp.csv
-```
-
-E conte a coluna `X-Served-By` do CSV. No Linux/macOS:
-
-```bash
-cut -d, -f<N> resp.csv | sort | uniq -c
-```
-
-(Descubra o índice `<N>` com `head -1 resp.csv`.)
-
-**Alternativa simples em Linux / macOS (bash):**
-
+Linux / macOS:
 ```bash
 for i in $(seq 1 100); do
-  curl -sI http://localhost:8080 | grep -i x-served-by
+  curl -sI http://localhost:8080 | awk 'tolower($1)=="x-served-by:"{print $2}'
 done | sort | uniq -c
 ```
 
-**Alternativa em Windows (PowerShell):**
-
+Windows (PowerShell):
 ```powershell
 1..100 | ForEach-Object {
   (Invoke-WebRequest -Method Head http://localhost:8080).Headers['X-Served-By']
 } | Group-Object | Select-Object Count, Name
 ```
 
-Esperado (com 3 instâncias): ~33/33/34 por instância.
+Esperado: ~33/33/34 por instância.
+
+**Estabilidade sob concorrência:**
+
+```bash
+hey -n 1000 -c 50 http://localhost:8080
+```
+
+Esperado no resumo final: `[200] 1000 responses` (zero erros). Prova que o LB
+distribui tráfego concorrente sem quebrar. O `hey` não exporta o header
+`X-Served-By` no CSV, por isso a contagem por instância é feita com `curl`.
 
 ### 7.4 Tolerância a falhas
 
-> **Não use `Ctrl+C` no terminal do `concurrently`** — o SIGINT é
+> **Não use `Ctrl+C` no terminal do `concurrently`** já que o SIGINT é
 > repassado a todos os filhos e derruba o LB junto. Mate **apenas** o
 > processo da porta 3002, pelo sistema operacional.
 
@@ -349,7 +343,7 @@ taskkill /PID <PID_ENCONTRADO> /F
 Depois:
 1. Repita 7.3 e a contagem de `app-02` some.
 2. Reative com `npm run start:app2` (em outro terminal).
-3. Aguarde ≤10 s e repita 7.3 — `app-02` volta com ~33 requisições.
+3. Aguarde ≤10 s e repita 7.3 e o `app-02` volta com ~33 requisições.
 
 ### 7.5 Escala (4ª instância)
 
@@ -360,7 +354,7 @@ arranjo com 4 instâncias em **um único comando**:
 npm run start:4
 ```
 
-Sob o capô: `app-01`..`app-04` nas portas 3001–3004, e o LB com `BACKENDS`
+Temos: `app-01`..`app-04` nas portas 3001–3004, e o Load Balance com `BACKENDS`
 já incluindo a `3004`. Sem sintaxe de env específica de shell e funciona
 igual em Linux, macOS e Windows.
 
@@ -426,3 +420,4 @@ node-load-balancer/
   atrás de um VIP/Anycast.
 - **Sem TLS, sem HTTP/2, sem rate limiting.** Tudo isso existe em
   NGINX/HAProxy/Traefik e pode ser citado como evolução do projeto.
+

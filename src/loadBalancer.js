@@ -26,6 +26,7 @@ function getNextHealthyServer() {
  * @param {http.ServerResponse} res 
  */
 function handleProxy(req, res, attempt = 0) {
+  // attempt se inicia com 0; com N backends, no máximo N tentativas reais
   if (attempt >= servers.length) {
     if (!res.headersSent) res.writeHead(503, { 'content-type': 'text/plain' });
     return res.end('Nenhum backend disponível');
@@ -81,6 +82,7 @@ function handleProxy(req, res, attempt = 0) {
     const idempotent = ['GET', 'HEAD', 'OPTIONS'].includes(req.method);
     if (!res.headersSent && idempotent) return handleProxy(req, res, attempt + 1);
 
+    req.resume();
     if (!res.headersSent) {
       res.writeHead(502, { 'content-type': 'text/plain' });
     }
@@ -95,19 +97,19 @@ server.listen(PORT, () => {
   console.log(`Load balancer está rodando na porta ${PORT}`)
 });
 
-function checkServerHealth(server) {
-  const url = new URL(`${server.url}/health`);
+function checkServerHealth(backend) {
+  const url = new URL(`${backend.url}/health`);
   const req = http.get({ hostname: url.hostname, port: url.port, path: url.pathname }, (res) => {
     res.resume();
     const ok = res.statusCode === 200;
-    if (ok && !server.healthy) console.log(`[Recuperação] ${server.url}`);
-    if (!ok && server.healthy) console.warn(`[Unhealthy] ${server.url} -> ${res.statusCode}`);
-    server.healthy = ok;
+    if (ok && !backend.healthy) console.log(`[Recuperação] ${backend.url}`);
+    if (!ok && backend.healthy) console.warn(`[Unhealthy] ${backend.url} -> ${res.statusCode}`);
+    backend.healthy = ok;
   });
   req.setTimeout(3000, () => req.destroy(new Error('health timeout')));
   req.on('error', (err) => {
-    if (server.healthy) console.warn(`[Unhealthy] ${server.url}: ${err.message}`);
-    server.healthy = false;
+    if (backend.healthy) console.warn(`[Unhealthy] ${backend.url}: ${err.message}`);
+    backend.healthy = false;
   });
 }
 
